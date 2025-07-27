@@ -20,6 +20,82 @@ bigIntStatus_t bigint_from_uint32(bigInt_t *a, uint32_t val){
   return BIGINT_OK;
 }
 
+
+// Essential for RSA: Load big integer from byte array (big-endian)
+bigIntStatus_t bigint_from_bytes(bigInt_t *a, const uint8_t *bytes, size_t byte_len) {
+    if (!a || !bytes) return BIGINT_ERR_NULL;
+    if (byte_len > BIGINT_MAX_WORDS * 4) return BIGINT_ERR_OVERFLOW;
+    
+    bigint_zero(a);
+    
+    // Load bytes in big-endian order
+    for (size_t i = 0; i < byte_len; i++) {
+        size_t word_idx = (byte_len - 1 - i) / 4;
+        size_t byte_pos = (byte_len - 1 - i) % 4;
+        a->words[word_idx] |= ((uint32_t)bytes[i]) << (byte_pos * 8);
+    }
+    
+    // Set length
+    a->length = (byte_len + 3) / 4;
+    bigint_normalize(a);
+    
+    return BIGINT_OK;
+}
+
+// Convert big integer to byte array (big-endian)
+bigIntStatus_t bigint_to_bytes(const bigInt_t *a, uint8_t *bytes, size_t target_len) {
+    if (!a || !bytes) return BIGINT_ERR_NULL;
+    
+    // Initialize output buffer with zeros
+    memset(bytes, 0, target_len);
+    
+    if (bigint_is_zero(a)) {
+        return BIGINT_OK;  // Already zero-filled
+    }
+    
+    // Calculate how many bytes we actually need
+    size_t actual_bytes_needed = 0;
+    for (int word_idx = a->length - 1; word_idx >= 0; word_idx--) {
+        uint32_t word = a->words[word_idx];
+        if (word_idx == a->length - 1) {
+            // For the most significant word, find the actual number of bytes
+            if (word & 0xFF000000) actual_bytes_needed = word_idx * 4 + 4;
+            else if (word & 0x00FF0000) actual_bytes_needed = word_idx * 4 + 3;
+            else if (word & 0x0000FF00) actual_bytes_needed = word_idx * 4 + 2;
+            else actual_bytes_needed = word_idx * 4 + 1;
+            break;
+        }
+    }
+    
+    // Check if the number is too big for target length
+    if (actual_bytes_needed > target_len) {
+        return BIGINT_ERR_OVERFLOW;
+    }
+    
+    // Fill bytes from right to left (big-endian)
+    size_t byte_idx = target_len - 1;
+    
+    // Process each word from least significant to most significant
+    for (int word_idx = 0; word_idx < a->length && byte_idx < target_len; word_idx++) {
+        uint32_t word = a->words[word_idx];
+        
+        // Extract bytes from word (little-endian to big-endian conversion)
+        for (int byte_in_word = 0; byte_in_word < 4 && byte_idx < target_len; byte_in_word++) {
+            bytes[byte_idx] = (uint8_t)(word >> (byte_in_word * 8));
+            if (byte_idx == 0) break;  // Prevent underflow
+            byte_idx--;
+        }
+    }
+    
+    return BIGINT_OK;
+}
+
+void bigint_normalize(bigInt_t *a) {
+    if (!a) return;
+    while (a->length > 1 && a->words[a->length - 1] == 0) {
+        a->length--;
+    }
+}
 bigIntStatus_t bigint_copy(bigInt_t *dst, const bigInt_t *src){
   if (!dst || !src) return BIGINT_ERR_NULL;
   memcpy(dst->words, src->words, BIGINT_WORD_BYTES * BIGINT_MAX_WORDS);
@@ -109,85 +185,6 @@ bigIntStatus_t bigint_sub(bigInt_t *res, const bigInt_t *a, const bigInt_t *b) {
     while (res->length > 1 && res->words[res->length - 1] == 0)
         res->length--;
     return BIGINT_OK;
-}
-
-bigIntStatus_t bigint_shift_left(bigInt_t *a, size_t bits) {
-    if (!a) return BIGINT_ERR_NULL;
-
-    size_t word_shift = bits / 32;
-    size_t bit_shift = bits % 32;
-
-    // Check overflow for word shift
-    if (word_shift > 0) {
-        if (a->length + word_shift > BIGINT_MAX_WORDS) {
-            return BIGINT_ERR_OVERFLOW;
-        }
-        
-        // Shift words (from right to left to avoid overwriting)
-        for (int i = (int)a->length - 1; i >= 0; --i) {
-            a->words[i + word_shift] = a->words[i];
-        }
-        // Clear lower words
-        for (size_t i = 0; i < word_shift; ++i) {
-            a->words[i] = 0;
-        }
-        a->length += word_shift;
-    }
-
-    // Bit shift within words
-    if (bit_shift > 0) {
-        uint32_t carry = 0;
-        for (size_t i = 0; i < a->length; ++i) {
-            uint32_t new_carry = a->words[i] >> (32 - bit_shift);
-            a->words[i] = (a->words[i] << bit_shift) | carry;
-            carry = new_carry;
-        }
-        // Handle final carry
-        if (carry) {
-            if (a->length >= BIGINT_MAX_WORDS) {
-                return BIGINT_ERR_OVERFLOW;
-            }
-            a->words[a->length++] = carry;
-        }
-    }
-
-    return BIGINT_OK;
-}
-
-bigIntStatus_t bigint_shift_right(bigInt_t *a, size_t bits) {
-  if (!a) return BIGINT_ERR_NULL;
-
-  size_t word_shift = bits / 32;
-  size_t bit_shift = bits % 32;
-
-  if (word_shift >= a->length) {
-      return bigint_zero(a);
-  }
-  
-  // Shift words
-  for (size_t i = 0; i < a->length - word_shift; ++i)
-      a->words[i] = a->words[i + word_shift];
-  
-  // Clear upper words
-  for (size_t i = a->length - word_shift; i < a->length; ++i)
-      a->words[i] = 0;
-      
-  a->length -= word_shift;
-  
-  // Bit shift within words
-  if (bit_shift > 0) {
-    uint32_t carry = 0;
-    for (int i = (int)a->length - 1; i >= 0; --i) {
-        uint32_t new_carry = a->words[i] << (32 - bit_shift);
-        a->words[i] = (a->words[i] >> bit_shift) | carry;
-        carry = new_carry;
-    }
-  }
-  
-  // Normalize
-  while (a->length > 1 && a->words[a->length - 1] == 0)
-      a->length--;
-  return BIGINT_OK;
 }
 
 bigIntStatus_t bigint_mul(bigInt_t *res, const bigInt_t *a, const bigInt_t *b) {
@@ -290,7 +287,86 @@ bigIntStatus_t bigint_mod(bigInt_t *res, const bigInt_t *a, const bigInt_t *m) {
     
     return bigint_copy(res, &rem);
 }
- 
+
+bigIntStatus_t bigint_shift_left(bigInt_t *a, size_t bits) {
+    if (!a) return BIGINT_ERR_NULL;
+
+    size_t word_shift = bits / 32;
+    size_t bit_shift = bits % 32;
+
+    // Check overflow for word shift
+    if (word_shift > 0) {
+        if (a->length + word_shift > BIGINT_MAX_WORDS) {
+            return BIGINT_ERR_OVERFLOW;
+        }
+        
+        // Shift words (from right to left to avoid overwriting)
+        for (int i = (int)a->length - 1; i >= 0; --i) {
+            a->words[i + word_shift] = a->words[i];
+        }
+        // Clear lower words
+        for (size_t i = 0; i < word_shift; ++i) {
+            a->words[i] = 0;
+        }
+        a->length += word_shift;
+    }
+
+    // Bit shift within words
+    if (bit_shift > 0) {
+        uint32_t carry = 0;
+        for (size_t i = 0; i < a->length; ++i) {
+            uint32_t new_carry = a->words[i] >> (32 - bit_shift);
+            a->words[i] = (a->words[i] << bit_shift) | carry;
+            carry = new_carry;
+        }
+        // Handle final carry
+        if (carry) {
+            if (a->length >= BIGINT_MAX_WORDS) {
+                return BIGINT_ERR_OVERFLOW;
+            }
+            a->words[a->length++] = carry;
+        }
+    }
+
+    return BIGINT_OK;
+}
+
+bigIntStatus_t bigint_shift_right(bigInt_t *a, size_t bits) {
+  if (!a) return BIGINT_ERR_NULL;
+
+  size_t word_shift = bits / 32;
+  size_t bit_shift = bits % 32;
+
+  if (word_shift >= a->length) {
+      return bigint_zero(a);
+  }
+  
+  // Shift words
+  for (size_t i = 0; i < a->length - word_shift; ++i)
+      a->words[i] = a->words[i + word_shift];
+  
+  // Clear upper words
+  for (size_t i = a->length - word_shift; i < a->length; ++i)
+      a->words[i] = 0;
+      
+  a->length -= word_shift;
+  
+  // Bit shift within words
+  if (bit_shift > 0) {
+    uint32_t carry = 0;
+    for (int i = (int)a->length - 1; i >= 0; --i) {
+        uint32_t new_carry = a->words[i] << (32 - bit_shift);
+        a->words[i] = (a->words[i] >> bit_shift) | carry;
+        carry = new_carry;
+    }
+  }
+  
+  // Normalize
+  while (a->length > 1 && a->words[a->length - 1] == 0)
+      a->length--;
+  return BIGINT_OK;
+}
+
 // Essential for RSA: Modular exponentiation using binary method
 bigIntStatus_t bigint_mod_exp(bigInt_t *res, const bigInt_t *base, const bigInt_t *exp, const bigInt_t *mod) {
   if (!res || !base || !exp || !mod) return BIGINT_ERR_NULL;
@@ -335,80 +411,4 @@ bigIntStatus_t bigint_mod_exp(bigInt_t *res, const bigInt_t *base, const bigInt_
   }
   
   return bigint_copy(res, &result);
-}
-
-// Essential for RSA: Load big integer from byte array (big-endian)
-bigIntStatus_t bigint_from_bytes(bigInt_t *a, const uint8_t *bytes, size_t byte_len) {
-    if (!a || !bytes) return BIGINT_ERR_NULL;
-    if (byte_len > BIGINT_MAX_WORDS * 4) return BIGINT_ERR_OVERFLOW;
-    
-    bigint_zero(a);
-    
-    // Load bytes in big-endian order
-    for (size_t i = 0; i < byte_len; i++) {
-        size_t word_idx = (byte_len - 1 - i) / 4;
-        size_t byte_pos = (byte_len - 1 - i) % 4;
-        a->words[word_idx] |= ((uint32_t)bytes[i]) << (byte_pos * 8);
-    }
-    
-    // Set length
-    a->length = (byte_len + 3) / 4;
-    bigint_normalize(a);
-    
-    return BIGINT_OK;
-}
-
-// Convert big integer to byte array (big-endian)
-bigIntStatus_t bigint_to_bytes(const bigInt_t *a, uint8_t *bytes, size_t target_len) {
-    if (!a || !bytes) return BIGINT_ERR_NULL;
-    
-    // Initialize output buffer with zeros
-    memset(bytes, 0, target_len);
-    
-    if (bigint_is_zero(a)) {
-        return BIGINT_OK;  // Already zero-filled
-    }
-    
-    // Calculate how many bytes we actually need
-    size_t actual_bytes_needed = 0;
-    for (int word_idx = a->length - 1; word_idx >= 0; word_idx--) {
-        uint32_t word = a->words[word_idx];
-        if (word_idx == a->length - 1) {
-            // For the most significant word, find the actual number of bytes
-            if (word & 0xFF000000) actual_bytes_needed = word_idx * 4 + 4;
-            else if (word & 0x00FF0000) actual_bytes_needed = word_idx * 4 + 3;
-            else if (word & 0x0000FF00) actual_bytes_needed = word_idx * 4 + 2;
-            else actual_bytes_needed = word_idx * 4 + 1;
-            break;
-        }
-    }
-    
-    // Check if the number is too big for target length
-    if (actual_bytes_needed > target_len) {
-        return BIGINT_ERR_OVERFLOW;
-    }
-    
-    // Fill bytes from right to left (big-endian)
-    size_t byte_idx = target_len - 1;
-    
-    // Process each word from least significant to most significant
-    for (int word_idx = 0; word_idx < a->length && byte_idx < target_len; word_idx++) {
-        uint32_t word = a->words[word_idx];
-        
-        // Extract bytes from word (little-endian to big-endian conversion)
-        for (int byte_in_word = 0; byte_in_word < 4 && byte_idx < target_len; byte_in_word++) {
-            bytes[byte_idx] = (uint8_t)(word >> (byte_in_word * 8));
-            if (byte_idx == 0) break;  // Prevent underflow
-            byte_idx--;
-        }
-    }
-    
-    return BIGINT_OK;
-}
-
-void bigint_normalize(bigInt_t *a) {
-    if (!a) return;
-    while (a->length > 1 && a->words[a->length - 1] == 0) {
-        a->length--;
-    }
 }

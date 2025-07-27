@@ -69,7 +69,7 @@ def main():
         macros.append(f"#define SIGNATURE_SIZE {sig_len}")
 
         print("Writing rsa_keys.h...")
-        with open('rsa_keys.h', 'w') as f:
+        with open('../rsakeys/rsa_keys.h', 'w') as f:
             f.write("#ifndef RSA_KEYS_H\n#define RSA_KEYS_H\n\n")
             f.write("#include <stdint.h>\n\n")
             for m in macros:
@@ -80,7 +80,7 @@ def main():
             f.write("\n#endif // RSA_KEYS_H\n")
 
         print("Writing rsa_keys.c...")
-        with open('rsa_keys.c', 'w') as f:
+        with open('../rsakeys/rsa_keys.c', 'w') as f:
             f.write('#include "rsa_keys.h"\n\n')
             for d in c_defs:
                 f.write(d + "\n")
