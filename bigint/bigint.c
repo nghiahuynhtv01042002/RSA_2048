@@ -239,58 +239,166 @@ bigIntStatus_t bigint_mul(bigInt_t *res, const bigInt_t *a, const bigInt_t *b) {
     return BIGINT_OK;
 }
 
+// helper bigint_divmode
+static uint32_t bigint_div_word(uint64_t dividend, uint32_t divisor, uint32_t *remainder) {
+    if (divisor == 0) {
+        *remainder = 0;
+        return 0;
+    }
+    *remainder = (uint32_t)(dividend % divisor);
+    return (uint32_t)(dividend / divisor);
+}
 
+// helper bigint_divmode
+static bigIntStatus_t bigint_div_word_inplace(bigInt_t *a, uint32_t divisor, uint32_t *remainder) {
+    if (!a || divisor == 0) return BIGINT_ERR_DIV_ZERO;
+    
+    uint64_t carry = 0;
+    for (int i = (int)a->length - 1; i >= 0; i--) {
+        uint64_t dividend = (carry << 32) | a->words[i];
+        a->words[i] = (uint32_t)(dividend / divisor);
+        carry = dividend % divisor;
+    }
+    
+    if (remainder) *remainder = (uint32_t)carry;
+    
+    // Normalize
+    while (a->length > 1 && a->words[a->length - 1] == 0) {
+        a->length--;
+    }
+    
+    return BIGINT_OK;
+}
+
+// Knuth's Algorithm 
 bigIntStatus_t bigint_divmod(bigInt_t *quot, bigInt_t *rem, const bigInt_t *num, const bigInt_t *den) {
     if (!quot || !rem || !num || !den) return BIGINT_ERR_NULL;
     if (bigint_is_zero(den)) return BIGINT_ERR_DIV_ZERO;
 
-    printf("[DEBUG] Starting divmod operation\n");
+    printf("[DEBUG] Starting improved divmod operation\n");
+    printf("[DEBUG] Numerator: %zu words, Denominator: %zu words\n", num->length, den->length);
     
     bigint_zero(quot);
-    bigIntStatus_t status = bigint_copy(rem, num);
-    if (status != BIGINT_OK) return status;
-
-    // Handle trivial cases
-    if (bigint_compare(num, den) < 0) {
-        printf("[DEBUG] Numerator < denominator, returning early\n");
-        return BIGINT_OK; // quot = 0, rem = num (already copied)
-    }
-
-    // Simple subtraction method (slower but more reliable)
-    printf("[DEBUG] Using subtraction method for division\n");
-    int iterations = 0;
-    const int MAX_DIV_ITERATIONS = 100000; // Giới hạn để tránh infinite loop
     
-    while (bigint_compare(rem, den) >= 0 && iterations < MAX_DIV_ITERATIONS) {
-        status = bigint_sub(rem, rem, den);
-        if (status != BIGINT_OK) {
-            printf("[DEBUG] Subtraction failed in divmod\n");
-            return status;
-        }
-        
-        // Increment quotient
-        bigInt_t one;
-        status = bigint_from_uint32(&one, 1);
+    // Handle trivial cases
+    int cmp = bigint_compare(num, den);
+    if (cmp < 0) {
+        // num < den: quotient = 0, remainder = num
+        return bigint_copy(rem, num);
+    } else if (cmp == 0) {
+        // num == den: quotient = 1, remainder = 0
+        bigint_zero(rem);
+        return bigint_from_uint32(quot, 1);
+    }
+    
+    // Special case: single word divisor (much faster)
+    if (den->length == 1) {
+        printf("[DEBUG] Using single-word division optimization\n");
+        bigIntStatus_t status = bigint_copy(quot, num);
         if (status != BIGINT_OK) return status;
         
-        status = bigint_add(quot, quot, &one);
-        if (status != BIGINT_OK) {
-            printf("[DEBUG] Addition failed in divmod\n");
-            return status;
+        uint32_t remainder_word;
+        status = bigint_div_word_inplace(quot, den->words[0], &remainder_word);
+        if (status != BIGINT_OK) return status;
+        
+        return bigint_from_uint32(rem, remainder_word);
+    }
+    
+    // General case: multi-word division using binary long division
+    printf("[DEBUG] Using binary long division\n");
+    
+    // Copy numerator to remainder
+    bigIntStatus_t status = bigint_copy(rem, num);
+    if (status != BIGINT_OK) return status;
+    
+    // Find the highest bit position in numerator
+    int num_bits = 0;
+    for (int i = (int)num->length - 1; i >= 0; i--) {
+        if (num->words[i] != 0) {
+            uint32_t word = num->words[i];
+            int word_bits = 32;
+            // Count leading zeros
+            if (word == 0) word_bits = 0;
+            else {
+                word_bits = 32;
+                if (!(word & 0xFFFF0000)) { word <<= 16; word_bits -= 16; }
+                if (!(word & 0xFF000000)) { word <<= 8; word_bits -= 8; }
+                if (!(word & 0xF0000000)) { word <<= 4; word_bits -= 4; }
+                if (!(word & 0xC0000000)) { word <<= 2; word_bits -= 2; }
+                if (!(word & 0x80000000)) { word <<= 1; word_bits -= 1; }
+            }
+            num_bits = i * 32 + word_bits;
+            break;
+        }
+    }
+    
+    // Find the highest bit position in denominator
+    int den_bits = 0;
+    for (int i = (int)den->length - 1; i >= 0; i--) {
+        if (den->words[i] != 0) {
+            uint32_t word = den->words[i];
+            int word_bits = 32;
+            if (word == 0) word_bits = 0;
+            else {
+                word_bits = 32;
+                if (!(word & 0xFFFF0000)) { word <<= 16; word_bits -= 16; }
+                if (!(word & 0xFF000000)) { word <<= 8; word_bits -= 8; }
+                if (!(word & 0xF0000000)) { word <<= 4; word_bits -= 4; }
+                if (!(word & 0xC0000000)) { word <<= 2; word_bits -= 2; }
+                if (!(word & 0x80000000)) { word <<= 1; word_bits -= 1; }
+            }
+            den_bits = i * 32 + word_bits;
+            break;
+        }
+    }
+    
+    printf("[DEBUG] Numerator bits: %d, Denominator bits: %d\n", num_bits, den_bits);
+    
+    if (num_bits < den_bits) {
+        // This shouldn't happen given our initial comparison, but be safe
+        return bigint_copy(rem, num);
+    }
+    
+    // Binary long division
+    for (int bit_pos = num_bits - den_bits; bit_pos >= 0; bit_pos--) {
+        // Create shifted divisor: den << bit_pos
+        bigInt_t shifted_den;
+        status = bigint_copy(&shifted_den, den);
+        if (status != BIGINT_OK) return status;
+        
+        if (bit_pos > 0) {
+            status = bigint_shift_left(&shifted_den, bit_pos);
+            if (status != BIGINT_OK) return status;
         }
         
-        iterations++;
-        if (iterations % 1000 == 0) {
-            printf("[DEBUG] Division iteration %d\n", iterations);
+        // If remainder >= shifted_den, subtract it and set quotient bit
+        if (bigint_compare(rem, &shifted_den) >= 0) {
+            status = bigint_sub(rem, rem, &shifted_den);
+            if (status != BIGINT_OK) return status;
+            
+            // Set bit in quotient
+            size_t word_pos = bit_pos / 32;
+            size_t bit_in_word = bit_pos % 32;
+            
+            if (word_pos >= BIGINT_MAX_WORDS) return BIGINT_ERR_OVERFLOW;
+            
+            quot->words[word_pos] |= (1U << bit_in_word);
+            if (word_pos >= quot->length) {
+                quot->length = word_pos + 1;
+            }
+        }
+        
+        if (bit_pos % 100 == 0 && bit_pos > 0) {
+            printf("[DEBUG] Division progress: bit %d/%d\n", num_bits - den_bits - bit_pos, num_bits - den_bits + 1);
         }
     }
     
-    if (iterations >= MAX_DIV_ITERATIONS) {
-        printf("[DEBUG] Division hit maximum iterations\n");
-        return BIGINT_ERR_OVERFLOW;
+    // Normalize quotient
+    while (quot->length > 1 && quot->words[quot->length - 1] == 0) {
+        quot->length--;
     }
     
-    printf("[DEBUG] Division completed in %d iterations\n", iterations);
+    printf("[DEBUG] Division completed successfully\n");
     return BIGINT_OK;
 }
 
