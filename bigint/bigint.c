@@ -1,6 +1,6 @@
 #include "bigint.h"
 #include <string.h>
-
+#include <stdio.h>
 bigIntStatus_t bigint_zero(bigInt_t *a){
   if(!a) return BIGINT_ERR_NULL;
   memset(a->words, 0, BIGINT_MAX_WORDS * BIGINT_WORD_BYTES);
@@ -188,93 +188,110 @@ bigIntStatus_t bigint_sub(bigInt_t *res, const bigInt_t *a, const bigInt_t *b) {
 }
 
 bigIntStatus_t bigint_mul(bigInt_t *res, const bigInt_t *a, const bigInt_t *b) {
-  if (!res || !a || !b) return BIGINT_ERR_NULL;
-  
-  // Check for overflow before multiplication
-  if (a->length + b->length > BIGINT_MAX_WORDS) {
-    return BIGINT_ERR_OVERFLOW;
-  }
-  
-  bigint_zero(res);
-  
-  for (size_t i = 0; i < a->length; ++i) {
-    if (a->words[i] == 0) continue; // Skip zero words for efficiency
+    if (!res || !a || !b) return BIGINT_ERR_NULL;
     
-    uint32_t carry = 0;
-    for (size_t j = 0; j < b->length; ++j) {
-      if (i + j >= BIGINT_MAX_WORDS) return BIGINT_ERR_OVERFLOW;
-      
-      uint64_t product = (uint64_t)a->words[i] * b->words[j];
-      uint64_t sum = (uint64_t)res->words[i + j] + (uint32_t)product + carry;
-      res->words[i + j] = (uint32_t)sum;
-      carry = (uint32_t)((product >> 32) + (sum >> 32));
+    // Check for overflow TRƯỚC khi multiplication
+    if (a->length + b->length > BIGINT_MAX_WORDS) {
+        printf("[DEBUG] Multiplication would overflow: %zu + %zu > %d\n", 
+               a->length, b->length, BIGINT_MAX_WORDS);
+        return BIGINT_ERR_OVERFLOW;
     }
     
-    if (carry && i + b->length < BIGINT_MAX_WORDS) {
-      res->words[i + b->length] = carry;
-    } else if (carry) {
-      return BIGINT_ERR_OVERFLOW;
+    printf("[DEBUG] Multiplying %zu-word by %zu-word numbers\n", a->length, b->length);
+    
+    bigint_zero(res);
+    
+    for (size_t i = 0; i < a->length; ++i) {
+        if (a->words[i] == 0) continue; // Skip zero words
+        
+        uint32_t carry = 0;
+        for (size_t j = 0; j < b->length; ++j) {
+            size_t pos = i + j;
+            if (pos >= BIGINT_MAX_WORDS) {
+                printf("[DEBUG] Position %zu exceeds BIGINT_MAX_WORDS\n", pos);
+                return BIGINT_ERR_OVERFLOW;
+            }
+            
+            uint64_t product = (uint64_t)a->words[i] * b->words[j];
+            uint64_t sum = (uint64_t)res->words[pos] + (uint32_t)product + carry;
+            res->words[pos] = (uint32_t)sum;
+            carry = (uint32_t)((product >> 32) + (sum >> 32));
+        }
+        
+        // Handle final carry
+        if (carry) {
+            size_t carry_pos = i + b->length;
+            if (carry_pos >= BIGINT_MAX_WORDS) {
+                printf("[DEBUG] Carry position %zu exceeds BIGINT_MAX_WORDS\n", carry_pos);
+                return BIGINT_ERR_OVERFLOW;
+            }
+            res->words[carry_pos] = carry;
+        }
     }
-  }
-  
-  res->length = a->length + b->length;
-  while (res->length > 1 && res->words[res->length - 1] == 0)
-      res->length--;
-
-  return BIGINT_OK;
+    
+    res->length = a->length + b->length;
+    // Normalize
+    while (res->length > 1 && res->words[res->length - 1] == 0) {
+        res->length--;
+    }
+    
+    printf("[DEBUG] Multiplication result length: %zu\n", res->length);
+    return BIGINT_OK;
 }
 
+
 bigIntStatus_t bigint_divmod(bigInt_t *quot, bigInt_t *rem, const bigInt_t *num, const bigInt_t *den) {
-  if (!quot || !rem || !num || !den) return BIGINT_ERR_NULL;
-  if (bigint_is_zero(den)) return BIGINT_ERR_DIV_ZERO;
+    if (!quot || !rem || !num || !den) return BIGINT_ERR_NULL;
+    if (bigint_is_zero(den)) return BIGINT_ERR_DIV_ZERO;
 
-  bigint_zero(quot);
-  bigint_copy(rem, num);
-
-  // Handle trivial cases
-  if (bigint_compare(num, den) < 0) {
-    return BIGINT_OK; // quot = 0, rem = num (already copied)
-  }
-
-  bigInt_t den_shifted;
-  bigIntStatus_t status;
-
-  while (bigint_compare(rem, den) >= 0) {
-    size_t shift = 0;
-    bigint_copy(&den_shifted, den);
+    printf("[DEBUG] Starting divmod operation\n");
     
-    // Find the largest shift where den_shifted <= rem
-    while (bigint_compare(rem, &den_shifted) >= 0) {
-        bigInt_t temp;
-        bigint_copy(&temp, &den_shifted);
-        status = bigint_shift_left(&temp, 1);
-        if (status != BIGINT_OK || bigint_compare(rem, &temp) < 0) {
-            break;
-        }
-        bigint_copy(&den_shifted, &temp);
-        shift++;
-    }
-
-    // Subtract den_shifted from remainder
-    status = bigint_sub(rem, rem, &den_shifted);
+    bigint_zero(quot);
+    bigIntStatus_t status = bigint_copy(rem, num);
     if (status != BIGINT_OK) return status;
+
+    // Handle trivial cases
+    if (bigint_compare(num, den) < 0) {
+        printf("[DEBUG] Numerator < denominator, returning early\n");
+        return BIGINT_OK; // quot = 0, rem = num (already copied)
+    }
+
+    // Simple subtraction method (slower but more reliable)
+    printf("[DEBUG] Using subtraction method for division\n");
+    int iterations = 0;
+    const int MAX_DIV_ITERATIONS = 100000; // Giới hạn để tránh infinite loop
     
-    // Set the bit in quotient
-    size_t word_idx = shift / 32;
-    size_t bit_idx = shift % 32;
-    if (word_idx < BIGINT_MAX_WORDS) {
-        quot->words[word_idx] |= (1U << bit_idx);
-        if (word_idx >= quot->length) {
-            quot->length = word_idx + 1;
+    while (bigint_compare(rem, den) >= 0 && iterations < MAX_DIV_ITERATIONS) {
+        status = bigint_sub(rem, rem, den);
+        if (status != BIGINT_OK) {
+            printf("[DEBUG] Subtraction failed in divmod\n");
+            return status;
+        }
+        
+        // Increment quotient
+        bigInt_t one;
+        status = bigint_from_uint32(&one, 1);
+        if (status != BIGINT_OK) return status;
+        
+        status = bigint_add(quot, quot, &one);
+        if (status != BIGINT_OK) {
+            printf("[DEBUG] Addition failed in divmod\n");
+            return status;
+        }
+        
+        iterations++;
+        if (iterations % 1000 == 0) {
+            printf("[DEBUG] Division iteration %d\n", iterations);
         }
     }
-  }
-
-  // Normalize quotient
-  while (quot->length > 1 && quot->words[quot->length - 1] == 0)
-      quot->length--;
-
-  return BIGINT_OK;
+    
+    if (iterations >= MAX_DIV_ITERATIONS) {
+        printf("[DEBUG] Division hit maximum iterations\n");
+        return BIGINT_ERR_OVERFLOW;
+    }
+    
+    printf("[DEBUG] Division completed in %d iterations\n", iterations);
+    return BIGINT_OK;
 }
 
 bigIntStatus_t bigint_mod(bigInt_t *res, const bigInt_t *a, const bigInt_t *m) {
@@ -367,48 +384,89 @@ bigIntStatus_t bigint_shift_right(bigInt_t *a, size_t bits) {
   return BIGINT_OK;
 }
 
-// Essential for RSA: Modular exponentiation using binary method
 bigIntStatus_t bigint_mod_exp(bigInt_t *res, const bigInt_t *base, const bigInt_t *exp, const bigInt_t *mod) {
-  if (!res || !base || !exp || !mod) return BIGINT_ERR_NULL;
-  if (bigint_is_zero(mod)) return BIGINT_ERR_DIV_ZERO;
-
-  bigInt_t result, b, e;
-  bigIntStatus_t status;
-  
-  // Initialize
-  status = bigint_from_uint32(&result, 1);
-  if (status != BIGINT_OK) return status;
-  
-  // Reduce base modulo mod first
-  status = bigint_mod(&b, base, mod);
-  if (status != BIGINT_OK) return status;
-  
-  status = bigint_copy(&e, exp);
-  if (status != BIGINT_OK) return status;
-  
-  // Binary exponentiation with modular reduction
-  while (!bigint_is_zero(&e)) {
-    if (e.words[0] & 1) {  // If exp is odd
-      bigInt_t temp;
-      status = bigint_mul(&temp, &result, &b);
-      if (status != BIGINT_OK) return status;
-      
-      status = bigint_mod(&result, &temp, mod);
-      if (status != BIGINT_OK) return status;
+    if (!res || !base || !exp || !mod) return BIGINT_ERR_NULL;
+    if (bigint_is_zero(mod)) return BIGINT_ERR_DIV_ZERO;
+    
+    printf("[DEBUG] Starting optimized mod_exp\n");
+    printf("[DEBUG] Base: %zu words, Exp: %zu words, Mod: %zu words\n", 
+           base->length, exp->length, mod->length);
+    
+    // Check if BIGINT_MAX_WORDS is sufficient
+    if (mod->length * 2 > BIGINT_MAX_WORDS) {
+        printf("[ERROR] BIGINT_MAX_WORDS (%d) too small for RSA operations\n", BIGINT_MAX_WORDS);
+        printf("[ERROR] Need at least %zu words\n", mod->length * 2);
+        return BIGINT_ERR_OVERFLOW;
     }
     
-    // Square base and reduce
-    bigInt_t temp;
-    status = bigint_mul(&temp, &b, &b);
+    bigInt_t result, b, e;
+    bigIntStatus_t status;
+    
+    // Initialize result = 1
+    status = bigint_from_uint32(&result, 1);
     if (status != BIGINT_OK) return status;
     
-    status = bigint_mod(&b, &temp, mod);
+    // Reduce base modulo mod first (quan trọng cho RSA)
+    status = bigint_mod(&b, base, mod);
+    if (status != BIGINT_OK) {
+        printf("[DEBUG] Failed to reduce base mod mod\n");
+        return status;
+    }
+    printf("[DEBUG] Base reduced to %zu words\n", b.length);
+    
+    status = bigint_copy(&e, exp);
     if (status != BIGINT_OK) return status;
     
-    // Divide exponent by 2
-    status = bigint_shift_right(&e, 1);
-    if (status != BIGINT_OK) return status;
-  }
-  
-  return bigint_copy(res, &result);
+    // Binary exponentiation
+    int iteration = 0;
+    const int MAX_ITERATIONS = 32 * exp->length; // Realistic limit
+    
+    while (!bigint_is_zero(&e) && iteration < MAX_ITERATIONS) {
+        if (iteration % 100 == 0) {
+            printf("[DEBUG] Iteration %d, exp length: %zu\n", iteration, e.length);
+        }
+        
+        if (e.words[0] & 1) {  // If exp is odd
+            bigInt_t temp;
+            status = bigint_mul(&temp, &result, &b);
+            if (status != BIGINT_OK) {
+                printf("[DEBUG] Multiplication failed at iteration %d\n", iteration);
+                return status;
+            }
+            
+            status = bigint_mod(&result, &temp, mod);
+            if (status != BIGINT_OK) {
+                printf("[DEBUG] Modular reduction failed at iteration %d\n", iteration);
+                return status;
+            }
+        }
+        
+        // Square base and reduce
+        bigInt_t temp;
+        status = bigint_mul(&temp, &b, &b);
+        if (status != BIGINT_OK) {
+            printf("[DEBUG] Base squaring failed at iteration %d\n", iteration);
+            return status;
+        }
+        
+        status = bigint_mod(&b, &temp, mod);
+        if (status != BIGINT_OK) {
+            printf("[DEBUG] Base mod reduction failed at iteration %d\n", iteration);
+            return status;
+        }
+        
+        // Divide exponent by 2
+        status = bigint_shift_right(&e, 1);
+        if (status != BIGINT_OK) return status;
+        
+        iteration++;
+    }
+    
+    if (iteration >= MAX_ITERATIONS) {
+        printf("[ERROR] Exceeded maximum iterations in mod_exp\n");
+        return BIGINT_ERR_OVERFLOW;
+    }
+    
+    printf("[DEBUG] Mod_exp completed after %d iterations\n", iteration);
+    return bigint_copy(res, &result);
 }

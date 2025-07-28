@@ -7,7 +7,7 @@
 
 #define BIGINT_WORD_BITS     (32)
 #define BIGINT_WORD_BYTES    (4)
-#define BIGINT_MAX_WORDS     (64) // 64 * 32 = 2048 bits
+#define BIGINT_MAX_WORDS     (128) // 64 * 32 = 2048 bits
 
 typedef enum {
     BIGINT_OK = 0,
