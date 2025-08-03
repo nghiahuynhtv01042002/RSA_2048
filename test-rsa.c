@@ -6,74 +6,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-void diagnose_rsa_inputs(const uint8_t *signature, const uint8_t *modulus, uint32_t exponent) {
-    printf("\n=== RSA INPUT DIAGNOSIS ===\n");
-    
-    printf("Signature (first 32 bytes):\n");
-    for (int i = 0; i < 32; i++) {
-        printf("%02X ", signature[i]);
-        if ((i + 1) % 16 == 0) printf("\n");
-    }
-    
-    printf("\nModulus (first 32 bytes):\n");
-    for (int i = 0; i < 32; i++) {
-        printf("%02X ", modulus[i]);
-        if ((i + 1) % 16 == 0) printf("\n");
-    }
-    
-    printf("\nExponent: 0x%08X (%u)\n", exponent, exponent);
-    
-    // Test if we can convert to bigint
-    bigInt_t sig_test, mod_test, exp_test;
-    
-    printf("\nTesting bigint conversions:\n");
-    if (bigint_from_bytes(&sig_test, signature, 256) == BIGINT_OK) {
-        printf("✅ Signature conversion OK\n");
-    } else {
-        printf("❌ Signature conversion FAILED\n");
-    }
-    
-    if (bigint_from_bytes(&mod_test, modulus, 256) == BIGINT_OK) {
-        printf("✅ Modulus conversion OK\n");
-    } else {
-        printf("❌ Modulus conversion FAILED\n");
-    }
-    
-    if (bigint_from_uint32(&exp_test, exponent) == BIGINT_OK) {
-        printf("✅ Exponent conversion OK\n");
-    } else {
-        printf("❌ Exponent conversion FAILED\n");
-    }
-}
-
-void test_basic_bigint_operations() {
-    printf("[TEST] Testing basic bigint operations...\n");
-    
-    bigInt_t a, b, result;
-    
-    // Test 1: Simple multiplication
-    bigint_from_uint32(&a, 123);
-    bigint_from_uint32(&b, 456);
-    
-    if (bigint_mul(&result, &a, &b) == BIGINT_OK) {
-        printf("[TEST] 123 * 456 = %u (should be 56088)\n", result.words[0]);
-    }
-    
-    // Test 2: Simple modular exponentiation
-    bigint_from_uint32(&a, 3);  // base
-    bigint_from_uint32(&b, 4);  // exponent
-    bigInt_t mod;
-    bigint_from_uint32(&mod, 100); // modulus
-    
-    if (bigint_mod_exp(&result, &a, &b, &mod) == BIGINT_OK) {
-        printf("[TEST] 3^4 mod 100 = %u (should be 81)\n", result.words[0]);
-    } else {
-        printf("[TEST] Modular exponentiation failed\n");
-    }
-}
-
 int main() {
-    test_basic_bigint_operations();
     printf("[INFO] Opening firmware.bin...\n");
 
     FILE *f = fopen("./genkey/firmware.bin", "rb");
