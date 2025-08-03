@@ -1,13 +1,25 @@
 #include "bigint.h"
 #include <string.h>
 #include <stdio.h>
+/**
+ * Sets the big integer to zero.
+ * 
+ * @param a Pointer to the big integer to be set to zero.
+ * @return Status code indicating success or null pointer error.
+ */
 bigIntStatus_t bigint_zero(bigInt_t *a){
   if(!a) return BIGINT_ERR_NULL;
   memset(a->words, 0, BIGINT_MAX_WORDS * BIGINT_WORD_BYTES);
   a->length = 1;
   return BIGINT_OK;
 }
-
+/**
+ * Initializes a big integer from a 32-bit unsigned integer.
+ * 
+ * @param a Pointer to the output big integer.
+ * @param val Input 32-bit value to convert.
+ * @return Status code indicating success or error.
+ */
 bigIntStatus_t bigint_from_uint32(bigInt_t *a, uint32_t val){
   if(!a) return BIGINT_ERR_NULL;
   bigint_zero(a);
@@ -20,7 +32,14 @@ bigIntStatus_t bigint_from_uint32(bigInt_t *a, uint32_t val){
   return BIGINT_OK;
 }
 
-
+/**
+ * Loads a big integer from a big-endian byte array.
+ * 
+ * @param a Pointer to the output big integer.
+ * @param bytes Input byte array (big-endian).
+ * @param byte_len Length of the input byte array.
+ * @return Status code indicating success or overflow/null error.
+ */
 // Essential for RSA: Load big integer from byte array (big-endian)
 bigIntStatus_t bigint_from_bytes(bigInt_t *a, const uint8_t *bytes, size_t byte_len) {
     if (!a || !bytes) return BIGINT_ERR_NULL;
@@ -42,7 +61,14 @@ bigIntStatus_t bigint_from_bytes(bigInt_t *a, const uint8_t *bytes, size_t byte_
     return BIGINT_OK;
 }
 
-// Convert big integer to byte array (big-endian)
+/**
+ * Converts a big integer to a big-endian byte array.
+ * 
+ * @param a Pointer to the input big integer.
+ * @param bytes Output byte array buffer (must be at least target_len bytes).
+ * @param target_len Target output size in bytes.
+ * @return Status code indicating success or overflow/null error.
+ */
 bigIntStatus_t bigint_to_bytes(const bigInt_t *a, uint8_t *bytes, size_t target_len) {
     if (!a || !bytes) return BIGINT_ERR_NULL;
     
@@ -89,20 +115,36 @@ bigIntStatus_t bigint_to_bytes(const bigInt_t *a, uint8_t *bytes, size_t target_
     
     return BIGINT_OK;
 }
-
+/**
+ * Normalizes a big integer by trimming leading zero words.
+ * 
+ * @param a Pointer to the big integer to normalize.
+ */
 void bigint_normalize(bigInt_t *a) {
     if (!a) return;
     while (a->length > 1 && a->words[a->length - 1] == 0) {
         a->length--;
     }
 }
+/**
+ * Copies a big integer from source to destination.
+ * 
+ * @param dst Pointer to destination big integer.
+ * @param src Pointer to source big integer.
+ * @return Status code indicating success or null pointer error.
+ */
 bigIntStatus_t bigint_copy(bigInt_t *dst, const bigInt_t *src){
   if (!dst || !src) return BIGINT_ERR_NULL;
   memcpy(dst->words, src->words, BIGINT_WORD_BYTES * BIGINT_MAX_WORDS);
   dst->length = src->length;
   return BIGINT_OK;
 }
-
+/**
+ * Checks whether the given big integer is zero.
+ * 
+ * @param a Pointer to the big integer.
+ * @return true if the integer is zero or NULL, false otherwise.
+ */
 bool bigint_is_zero(const bigInt_t *a){
   if(!a) return true;
   for(int i = 0; i < a->length ; ++i){
@@ -132,7 +174,14 @@ int bigint_compare(const bigInt_t *a, const bigInt_t *b){
   }
   return 0;
 }
-
+/**
+ * Adds two big integers and stores the result.
+ * 
+ * @param res Pointer to output big integer.
+ * @param a Pointer to the first operand.
+ * @param b Pointer to the second operand.
+ * @return Status code indicating success or overflow/null error.
+ */
 bigIntStatus_t bigint_add(bigInt_t *res, const bigInt_t *a, const bigInt_t *b) {
   if (!res || !a || !b) return BIGINT_ERR_NULL;
 
@@ -155,7 +204,14 @@ bigIntStatus_t bigint_add(bigInt_t *res, const bigInt_t *a, const bigInt_t *b) {
   res->length = i;
   return BIGINT_OK;
 }
-
+/**
+ * Subtracts b from a and stores the result.
+ * 
+ * @param res Pointer to output big integer.
+ * @param a Pointer to minuend (must be >= b).
+ * @param b Pointer to subtrahend.
+ * @return Status code or overflow if result would be negative.
+ */
 bigIntStatus_t bigint_sub(bigInt_t *res, const bigInt_t *a, const bigInt_t *b) {
     if (!res || !a || !b) return BIGINT_ERR_NULL;
     
@@ -186,18 +242,21 @@ bigIntStatus_t bigint_sub(bigInt_t *res, const bigInt_t *a, const bigInt_t *b) {
         res->length--;
     return BIGINT_OK;
 }
-
+/**
+ * Multiplies two big integers and stores the result.
+ * 
+ * @param res Pointer to output big integer.
+ * @param a Pointer to the first operand.
+ * @param b Pointer to the second operand.
+ * @return Status code indicating success or overflow/null error.
+ */
 bigIntStatus_t bigint_mul(bigInt_t *res, const bigInt_t *a, const bigInt_t *b) {
     if (!res || !a || !b) return BIGINT_ERR_NULL;
     
     // Check for overflow TRƯỚC khi multiplication
     if (a->length + b->length > BIGINT_MAX_WORDS) {
-        printf("[DEBUG] Multiplication would overflow: %zu + %zu > %d\n", 
-               a->length, b->length, BIGINT_MAX_WORDS);
         return BIGINT_ERR_OVERFLOW;
     }
-    
-    printf("[DEBUG] Multiplying %zu-word by %zu-word numbers\n", a->length, b->length);
     
     bigint_zero(res);
     
@@ -208,7 +267,6 @@ bigIntStatus_t bigint_mul(bigInt_t *res, const bigInt_t *a, const bigInt_t *b) {
         for (size_t j = 0; j < b->length; ++j) {
             size_t pos = i + j;
             if (pos >= BIGINT_MAX_WORDS) {
-                printf("[DEBUG] Position %zu exceeds BIGINT_MAX_WORDS\n", pos);
                 return BIGINT_ERR_OVERFLOW;
             }
             
@@ -222,7 +280,6 @@ bigIntStatus_t bigint_mul(bigInt_t *res, const bigInt_t *a, const bigInt_t *b) {
         if (carry) {
             size_t carry_pos = i + b->length;
             if (carry_pos >= BIGINT_MAX_WORDS) {
-                printf("[DEBUG] Carry position %zu exceeds BIGINT_MAX_WORDS\n", carry_pos);
                 return BIGINT_ERR_OVERFLOW;
             }
             res->words[carry_pos] = carry;
@@ -235,7 +292,6 @@ bigIntStatus_t bigint_mul(bigInt_t *res, const bigInt_t *a, const bigInt_t *b) {
         res->length--;
     }
     
-    printf("[DEBUG] Multiplication result length: %zu\n", res->length);
     return BIGINT_OK;
 }
 
@@ -269,15 +325,21 @@ static bigIntStatus_t bigint_div_word_inplace(bigInt_t *a, uint32_t divisor, uin
     
     return BIGINT_OK;
 }
-
+/**
+ * Computes the quotient and remainder of num / den.
+ * 
+ * @param quot Pointer to output quotient.
+ * @param rem Pointer to output remainder.
+ * @param num Pointer to numerator.
+ * @param den Pointer to denominator.
+ * @return Status code indicating success, divide-by-zero, or overflow.
+ */
 // Knuth's Algorithm 
+// I try to use subtraction method before but it's a bad idea. 
 bigIntStatus_t bigint_divmod(bigInt_t *quot, bigInt_t *rem, const bigInt_t *num, const bigInt_t *den) {
     if (!quot || !rem || !num || !den) return BIGINT_ERR_NULL;
     if (bigint_is_zero(den)) return BIGINT_ERR_DIV_ZERO;
 
-    printf("[DEBUG] Starting improved divmod operation\n");
-    printf("[DEBUG] Numerator: %zu words, Denominator: %zu words\n", num->length, den->length);
-    
     bigint_zero(quot);
     
     // Handle trivial cases
@@ -293,7 +355,6 @@ bigIntStatus_t bigint_divmod(bigInt_t *quot, bigInt_t *rem, const bigInt_t *num,
     
     // Special case: single word divisor (much faster)
     if (den->length == 1) {
-        printf("[DEBUG] Using single-word division optimization\n");
         bigIntStatus_t status = bigint_copy(quot, num);
         if (status != BIGINT_OK) return status;
         
@@ -305,7 +366,6 @@ bigIntStatus_t bigint_divmod(bigInt_t *quot, bigInt_t *rem, const bigInt_t *num,
     }
     
     // General case: multi-word division using binary long division
-    printf("[DEBUG] Using binary long division\n");
     
     // Copy numerator to remainder
     bigIntStatus_t status = bigint_copy(rem, num);
@@ -352,7 +412,6 @@ bigIntStatus_t bigint_divmod(bigInt_t *quot, bigInt_t *rem, const bigInt_t *num,
         }
     }
     
-    printf("[DEBUG] Numerator bits: %d, Denominator bits: %d\n", num_bits, den_bits);
     
     if (num_bits < den_bits) {
         // This shouldn't happen given our initial comparison, but be safe
@@ -387,10 +446,6 @@ bigIntStatus_t bigint_divmod(bigInt_t *quot, bigInt_t *rem, const bigInt_t *num,
                 quot->length = word_pos + 1;
             }
         }
-        
-        if (bit_pos % 100 == 0 && bit_pos > 0) {
-            printf("[DEBUG] Division progress: bit %d/%d\n", num_bits - den_bits - bit_pos, num_bits - den_bits + 1);
-        }
     }
     
     // Normalize quotient
@@ -398,10 +453,16 @@ bigIntStatus_t bigint_divmod(bigInt_t *quot, bigInt_t *rem, const bigInt_t *num,
         quot->length--;
     }
     
-    printf("[DEBUG] Division completed successfully\n");
     return BIGINT_OK;
 }
-
+/**
+ * Computes a modulo m and stores the result.
+ * 
+ * @param res Pointer to output big integer.
+ * @param a Pointer to the dividend.
+ * @param m Pointer to the modulus.
+ * @return Status code indicating success or divide-by-zero/null error.
+ */
 bigIntStatus_t bigint_mod(bigInt_t *res, const bigInt_t *a, const bigInt_t *m) {
     if (!res || !a || !m) return BIGINT_ERR_NULL;
     if (bigint_is_zero(m)) return BIGINT_ERR_DIV_ZERO;
@@ -412,7 +473,13 @@ bigIntStatus_t bigint_mod(bigInt_t *res, const bigInt_t *a, const bigInt_t *m) {
     
     return bigint_copy(res, &rem);
 }
-
+/**
+ * Left-shifts a big integer by a given number of bits.
+ * 
+ * @param a Pointer to the big integer to shift.
+ * @param bits Number of bits to shift left.
+ * @return Status code indicating success or overflow.
+ */
 bigIntStatus_t bigint_shift_left(bigInt_t *a, size_t bits) {
     if (!a) return BIGINT_ERR_NULL;
 
@@ -455,7 +522,13 @@ bigIntStatus_t bigint_shift_left(bigInt_t *a, size_t bits) {
 
     return BIGINT_OK;
 }
-
+/**
+ * Right-shifts a big integer by a given number of bits.
+ * 
+ * @param a Pointer to the big integer to shift.
+ * @param bits Number of bits to shift right.
+ * @return Status code indicating success.
+ */
 bigIntStatus_t bigint_shift_right(bigInt_t *a, size_t bits) {
   if (!a) return BIGINT_ERR_NULL;
 
@@ -491,19 +564,21 @@ bigIntStatus_t bigint_shift_right(bigInt_t *a, size_t bits) {
       a->length--;
   return BIGINT_OK;
 }
-
+/**
+ * Computes modular exponentiation: res = (base^exp) mod mod.
+ * 
+ * @param res Pointer to output big integer.
+ * @param base Pointer to base.
+ * @param exp Pointer to exponent.
+ * @param mod Pointer to modulus.
+ * @return Status code indicating success, overflow, or divide-by-zero/null error.
+ */
 bigIntStatus_t bigint_mod_exp(bigInt_t *res, const bigInt_t *base, const bigInt_t *exp, const bigInt_t *mod) {
     if (!res || !base || !exp || !mod) return BIGINT_ERR_NULL;
     if (bigint_is_zero(mod)) return BIGINT_ERR_DIV_ZERO;
     
-    printf("[DEBUG] Starting optimized mod_exp\n");
-    printf("[DEBUG] Base: %zu words, Exp: %zu words, Mod: %zu words\n", 
-           base->length, exp->length, mod->length);
-    
     // Check if BIGINT_MAX_WORDS is sufficient
     if (mod->length * 2 > BIGINT_MAX_WORDS) {
-        printf("[ERROR] BIGINT_MAX_WORDS (%d) too small for RSA operations\n", BIGINT_MAX_WORDS);
-        printf("[ERROR] Need at least %zu words\n", mod->length * 2);
         return BIGINT_ERR_OVERFLOW;
     }
     
@@ -517,10 +592,8 @@ bigIntStatus_t bigint_mod_exp(bigInt_t *res, const bigInt_t *base, const bigInt_
     // Reduce base modulo mod first (quan trọng cho RSA)
     status = bigint_mod(&b, base, mod);
     if (status != BIGINT_OK) {
-        printf("[DEBUG] Failed to reduce base mod mod\n");
         return status;
     }
-    printf("[DEBUG] Base reduced to %zu words\n", b.length);
     
     status = bigint_copy(&e, exp);
     if (status != BIGINT_OK) return status;
@@ -530,21 +603,15 @@ bigIntStatus_t bigint_mod_exp(bigInt_t *res, const bigInt_t *base, const bigInt_
     const int MAX_ITERATIONS = 32 * exp->length; // Realistic limit
     
     while (!bigint_is_zero(&e) && iteration < MAX_ITERATIONS) {
-        if (iteration % 100 == 0) {
-            printf("[DEBUG] Iteration %d, exp length: %zu\n", iteration, e.length);
-        }
-        
         if (e.words[0] & 1) {  // If exp is odd
             bigInt_t temp;
             status = bigint_mul(&temp, &result, &b);
             if (status != BIGINT_OK) {
-                printf("[DEBUG] Multiplication failed at iteration %d\n", iteration);
                 return status;
             }
             
             status = bigint_mod(&result, &temp, mod);
             if (status != BIGINT_OK) {
-                printf("[DEBUG] Modular reduction failed at iteration %d\n", iteration);
                 return status;
             }
         }
@@ -553,13 +620,11 @@ bigIntStatus_t bigint_mod_exp(bigInt_t *res, const bigInt_t *base, const bigInt_
         bigInt_t temp;
         status = bigint_mul(&temp, &b, &b);
         if (status != BIGINT_OK) {
-            printf("[DEBUG] Base squaring failed at iteration %d\n", iteration);
             return status;
         }
         
         status = bigint_mod(&b, &temp, mod);
         if (status != BIGINT_OK) {
-            printf("[DEBUG] Base mod reduction failed at iteration %d\n", iteration);
             return status;
         }
         
@@ -571,10 +636,8 @@ bigIntStatus_t bigint_mod_exp(bigInt_t *res, const bigInt_t *base, const bigInt_
     }
     
     if (iteration >= MAX_ITERATIONS) {
-        printf("[ERROR] Exceeded maximum iterations in mod_exp\n");
         return BIGINT_ERR_OVERFLOW;
     }
     
-    printf("[DEBUG] Mod_exp completed after %d iterations\n", iteration);
     return bigint_copy(res, &result);
 }
