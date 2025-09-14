@@ -9,6 +9,11 @@ It shows how to generate keys, sign a firmware binary, and test verification.
 - [OpenSSL](https://www.openssl.org/) installed
 
 ## Scripts
+Run it with:
+
+``` bash 
+bash autobuild.sh
+```
 
 ### 1. `generate_keys.sh`
 This script:
@@ -21,7 +26,9 @@ This script:
 Run it with:
 
 ```bash
+cd ./genkey
 bash generate_keys.sh
+python python convert_keys.py 
 ```
 ### 2. build_test-rsa.sh
 
