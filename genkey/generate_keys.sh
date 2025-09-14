@@ -1,30 +1,30 @@
 #!/bin/bash
 
-# Tạo RSA private key 2048-bit
+# Generate RSA 2048-bit private key
 echo "Generating RSA private key..."
 openssl genrsa -out private_key.pem 2048
 
-# Tạo public key từ private key
+# Generate public key from private key
 echo "Extracting public key..."
 openssl rsa -in private_key.pem -pubout -out public_key.pem
 
-# Tạo chữ ký cho firmware.bin (SHA-256 + RSA)
+# Sign firmware.bin (SHA-256 + RSA)
 echo "Signing firmware.bin..."
 openssl dgst -sha256 -sign private_key.pem -out firmware.sig firmware.bin
 
-# Verify chữ ký (để test)
+# Verify signature (for testing)
 echo "Verifying signature..."
 openssl dgst -sha256 -verify public_key.pem -signature firmware.sig firmware.bin
 
-# Extract modulus và public exponent thành hex format
+# Extract modulus and public exponent in hex format
 echo "Extracting modulus and exponent..."
 openssl rsa -in public_key.pem -pubin -text -noout > key_info.txt
 
-# Extract modulus (bỏ ":" và newlines)
+# Extract modulus (remove ":" and newlines)
 echo "Extracting modulus as hex array..."
 openssl rsa -in public_key.pem -pubin -modulus -noout | sed 's/Modulus=//' > modulus.hex
 
-# Extract exponent 
+# Extract exponent
 echo "Extracting exponent..."
 openssl rsa -in public_key.pem -pubin -text -noout | grep "Exponent:" | awk '{print $2}' > exponent.txt
 
